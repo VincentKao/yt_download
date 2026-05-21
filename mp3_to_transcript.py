@@ -27,7 +27,7 @@ def check_faster_whisper() -> bool:
 def install_faster_whisper():
     print("未偵測到 faster-whisper，自動安裝中...")
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "faster-whisper"],
+        [sys.executable, "-m", "pip", "install", "faster-whisper", "--break-system-packages"],
         check=True
     )
     print("faster-whisper 安裝完成！\n")
