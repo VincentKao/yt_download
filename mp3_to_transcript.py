@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-MP3 → 逐字稿（使用 faster-whisper large-v3）
+MP3 → 逐字稿（使用 faster-whisper）
 
 使用方式：
-  python mp3_to_transcript.py                     # 處理當前目錄所有 MP3
-  python mp3_to_transcript.py "file.mp3"          # 指定單一檔案
-  python mp3_to_transcript.py -l ko               # 強制指定語言（zh/ko/en）
-  python mp3_to_transcript.py -t                  # 逐字稿 + 翻譯成英文
-  python mp3_to_transcript.py --skip-existing     # 跳過已有逐字稿的檔案
+  python mp3_to_transcript.py                       # 處理當前目錄所有 MP3（large-v3）
+  python mp3_to_transcript.py "file.mp3"            # 指定單一檔案
+  python mp3_to_transcript.py --model medium        # 改用 medium（快 3-4 倍）
+  python mp3_to_transcript.py -l ko                 # 強制指定語言（zh/ko/en）
+  python mp3_to_transcript.py -t                    # 翻譯成英文
+  python mp3_to_transcript.py --skip-existing       # 跳過已有逐字稿的檔案
 """
 
 import subprocess
@@ -33,12 +34,20 @@ def install_faster_whisper():
     print("faster-whisper 安裝完成！\n")
 
 
-def load_model():
+def load_model(model_name: str):
     from faster_whisper import WhisperModel
-    print("載入模型 large-v3（首次執行會下載約 3.1 GB）...")
-    model = WhisperModel("large-v3", device="cpu", compute_type="int8")
+    sizes = {"medium": "1.5 GB", "large-v3": "3.1 GB"}
+    size_hint = sizes.get(model_name, "")
+    print(f"載入模型 {model_name}（首次執行會下載約 {size_hint}）...")
+    model = WhisperModel(model_name, device="cpu", compute_type="int8")
     print("模型載入完成！\n")
     return model
+
+
+def format_time(seconds: float) -> str:
+    m = int(seconds // 60)
+    s = seconds % 60
+    return f"{m:02d}:{s:05.2f}"
 
 
 def transcribe_file(model, mp3_path: Path, language: str = None, translate: bool = False) -> str:
@@ -50,19 +59,18 @@ def transcribe_file(model, mp3_path: Path, language: str = None, translate: bool
         language=language,
         task=task,
         beam_size=5,
-        vad_filter=True,          # 過濾靜音段落
+        vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
     )
 
-    detected = info.language
-    confidence = info.language_probability
-    print(f"  偵測語言：{detected}（信心度 {confidence:.0%}）")
+    print(f"  偵測語言：{info.language}（信心度 {info.language_probability:.0%}）")
+    print(f"  開始逐句轉錄，請稍候...\n")
 
     lines = []
     for segment in segments:
-        start = f"{int(segment.start // 60):02d}:{segment.start % 60:05.2f}"
-        end   = f"{int(segment.end   // 60):02d}:{segment.end   % 60:05.2f}"
-        lines.append(f"[{start} → {end}] {segment.text.strip()}")
+        line = f"[{format_time(segment.start)} → {format_time(segment.end)}] {segment.text.strip()}"
+        lines.append(line)
+        print(f"  {line}", flush=True)   # 即時顯示每一句，確認有在跑
 
     return "\n".join(lines)
 
@@ -71,19 +79,24 @@ def process_file(model, mp3_path: Path, language: str, translate: bool, skip_exi
     output_path = mp3_path.with_suffix(".txt")
 
     if skip_existing and output_path.exists():
-        print(f"跳過（已有逐字稿）：{mp3_path.name}")
+        print(f"跳過（已有逐字稿）：{mp3_path.name}\n")
         return
 
     transcript = transcribe_file(model, mp3_path, language=language, translate=translate)
     output_path.write_text(transcript, encoding="utf-8")
-    print(f"  ✅ 儲存至：{output_path.name}\n")
+    print(f"\n  ✅ 儲存至：{output_path.name}\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MP3 轉逐字稿（faster-whisper large-v3）")
+    parser = argparse.ArgumentParser(description="MP3 轉逐字稿（faster-whisper）")
     parser.add_argument(
         "input", nargs="?", default=".",
         help="MP3 檔案路徑或資料夾（預設：當前目錄）"
+    )
+    parser.add_argument(
+        "--model", "-m", default="large-v3",
+        choices=["tiny", "base", "small", "medium", "large-v3"],
+        help="模型大小（預設：large-v3；想要快用 medium）"
     )
     parser.add_argument(
         "--language", "-l", default=None,
@@ -91,7 +104,7 @@ def main():
     )
     parser.add_argument(
         "--translate", "-t", action="store_true",
-        help="將音訊翻譯成英文（僅支援輸出英文）"
+        help="將音訊翻譯成英文"
     )
     parser.add_argument(
         "--skip-existing", "-s", action="store_true",
@@ -119,9 +132,10 @@ def main():
         print(f"路徑不存在：{args.input}")
         sys.exit(1)
 
-    model = load_model()
+    model = load_model(args.model)
 
-    for mp3 in mp3_files:
+    for i, mp3 in enumerate(mp3_files, 1):
+        print(f"[{i}/{len(mp3_files)}]", end=" ")
         process_file(
             model, mp3,
             language=args.language,
