@@ -50,7 +50,8 @@ def format_time(seconds: float) -> str:
     return f"{m:02d}:{s:05.2f}"
 
 
-def transcribe_file(model, mp3_path: Path, language: str = None, translate: bool = False) -> str:
+def transcribe_file(model, mp3_path: Path, language: str = None, translate: bool = False):
+    """回傳 (帶時間戳的行列表, 純文字行列表)"""
     task = "translate" if translate else "transcribe"
 
     print(f"轉錄中：{mp3_path.name}")
@@ -66,13 +67,16 @@ def transcribe_file(model, mp3_path: Path, language: str = None, translate: bool
     print(f"  偵測語言：{info.language}（信心度 {info.language_probability:.0%}）")
     print(f"  開始逐句轉錄，請稍候...\n")
 
-    lines = []
+    timestamped_lines = []
+    plain_lines = []
     for segment in segments:
-        line = f"[{format_time(segment.start)} → {format_time(segment.end)}] {segment.text.strip()}"
-        lines.append(line)
-        print(f"  {line}", flush=True)   # 即時顯示每一句，確認有在跑
+        text = segment.text.strip()
+        line = f"[{format_time(segment.start)} → {format_time(segment.end)}] {text}"
+        timestamped_lines.append(line)
+        plain_lines.append(text)
+        print(f"  {line}", flush=True)
 
-    return "\n".join(lines)
+    return timestamped_lines, plain_lines
 
 
 def process_file(model, mp3_path: Path, language: str, translate: bool, skip_existing: bool):
@@ -82,8 +86,23 @@ def process_file(model, mp3_path: Path, language: str, translate: bool, skip_exi
         print(f"跳過（已有逐字稿）：{mp3_path.name}\n")
         return
 
-    transcript = transcribe_file(model, mp3_path, language=language, translate=translate)
-    output_path.write_text(transcript, encoding="utf-8")
+    timestamped_lines, plain_lines = transcribe_file(
+        model, mp3_path, language=language, translate=translate
+    )
+
+    content = (
+        "═" * 60 + "\n"
+        "【逐字稿 with 時間戳】\n"
+        + "═" * 60 + "\n"
+        + "\n".join(timestamped_lines)
+        + "\n\n"
+        + "═" * 60 + "\n"
+        "【完整逐字稿（無時間戳）】\n"
+        + "═" * 60 + "\n"
+        + " ".join(plain_lines)
+    )
+
+    output_path.write_text(content, encoding="utf-8")
     print(f"\n  ✅ 儲存至：{output_path.name}\n")
 
 
